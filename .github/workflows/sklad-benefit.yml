@@ -1,1 +1,40 @@
+name: Benefit sklad do Shoptet feedu
 
+on:
+  schedule:
+    - cron: "15 4,7,10,13,16,19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Kniznice
+        run: pip install lxml
+
+      - name: Stiahni Benefit sklad a konvertuj
+        env:
+          BENEFIT_XML_URL: ${{ secrets.BENEFIT_XML_URL }}
+        run: |
+          mkdir -p docs
+          touch docs/.nojekyll
+          python3 benefit_sklad_feed.py - docs/benefit_sklad_shoptet.xml
+
+      - name: Publikuj do docs
+        run: |
+          git config user.name "sklad-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/benefit_sklad_shoptet.xml docs/.nojekyll
+          git diff --cached --quiet || git commit -m "sklad update"
+          git push
