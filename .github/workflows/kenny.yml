@@ -1,0 +1,37 @@
+name: Kenny sklad feed
+
+on:
+  schedule:
+    - cron: '40 */4 * * *'   # každé 4 hodiny, posunuté oproti Benefitu aj Slogerovi
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install lxml
+
+      - name: Generate feed
+        env:
+          KENNY_XML_URL: https://www.skprofibike.sk/dostupnost.xml
+        run: |
+          mkdir -p docs
+          python3 kenny_sklad_feed.py - docs/kenny_sklad_shoptet.xml
+
+      - name: Commit
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/kenny_sklad_shoptet.xml
+          git diff --staged --quiet || git commit -m "kenny sklad update"
+          git push
