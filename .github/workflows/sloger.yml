@@ -1,0 +1,37 @@
+name: Sloger sklad feed
+
+on:
+  schedule:
+    - cron: '20 */4 * * *'   # každé 4 hodiny, o 20 minút posunuté oproti Benefitu
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install lxml
+
+      - name: Generate feed
+        env:
+          SLOGER_XML_URL: ${{ secrets.SLOGER_XML_URL }}
+        run: |
+          mkdir -p docs
+          python3 sloger_sklad_feed.py - docs/sloger_sklad_shoptet.xml
+
+      - name: Commit
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/sloger_sklad_shoptet.xml
+          git diff --staged --quiet || git commit -m "sloger sklad update"
+          git push
