@@ -2,7 +2,7 @@ name: Sloger sklad feed
 
 on:
   schedule:
-    - cron: '20 */4 * * *'   # každé 4 hodiny, o 20 minút posunuté oproti Benefitu
+    - cron: '20 */4 * * *'
   workflow_dispatch:
 
 permissions:
@@ -24,6 +24,7 @@ jobs:
       - name: Generate feed
         env:
           SLOGER_XML_URL: ${{ secrets.SLOGER_XML_URL }}
+          SLOGER_CATALOG_URL: ${{ secrets.SLOGER_CATALOG_URL }}
         run: |
           mkdir -p docs
           python3 sloger_sklad_feed.py - docs/sloger_sklad_shoptet.xml
