@@ -22,6 +22,9 @@ UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/126.0 Safari/537.36')
 ATTEMPTS, WAIT, TIMEOUT, MIN_ITEMS = 5, 60, 180, 100
 
+DOPLNIT_VARIANTY = True   # dopĺňať chýbajúce veľkosti podľa kódu modelu
+MIN_VARIANTOV = 2         # koľko veľkostí musí model mať, aby sa dopĺňalo
+
 
 def fetch(url):
     import urllib.request
@@ -84,6 +87,27 @@ def main(dst):
 
     chybajuce = katalog - set(stock)
 
+    # 2b) doplnenie chýbajúcich veľkostí
+    # Kódy variantov = kód modelu (9 znakov) + jedna číslica.
+    # Pre model, kde poznáme aspoň MIN_VARIANTOV veľkostí, doplníme zvyšné číslice.
+    # Kód, ktorý v e-shope neexistuje, Shoptet pri "iba existujúce" ignoruje.
+    doplnene = set()
+    if DOPLNIT_VARIANTY:
+        from collections import defaultdict
+        znama = set(stock) | katalog
+        pref = defaultdict(set)
+        for c in znama:
+            if c.isdigit() and len(c) == 10:
+                pref[c[:9]].add(c[9])
+        for p, cislice in pref.items():
+            if len(cislice) < MIN_VARIANTOV:
+                continue
+            for x in '0123456789':
+                if x not in cislice:
+                    doplnene.add(p + x)
+        doplnene -= znama
+        print(f'  doplnené chýbajúce veľkosti: {len(doplnene)} kódov')
+
     # 3) výstup
     shop = etree.Element('SHOP')
 
@@ -99,10 +123,13 @@ def main(dst):
         polozka(code, qty, DAYS_TEXT.get(days, OUT_TEXT))
     for code in sorted(chybajuce):
         polozka(code, 0, MISSING_TEXT)
+    for code in sorted(doplnene):
+        polozka(code, 0, MISSING_TEXT)
 
     etree.ElementTree(shop).write(dst, encoding='UTF-8', xml_declaration=True, pretty_print=True)
-    print(f'OK: {len(stock)} z dostupností + {len(chybajuce)} vynulovaných = '
-          f'{len(stock) + len(chybajuce)} položiek → {dst}')
+    print(f'OK: {len(stock)} z dostupností + {len(chybajuce)} chýbajúcich v katalógu '
+          f'+ {len(doplnene)} doplnených veľkostí = '
+          f'{len(stock) + len(chybajuce) + len(doplnene)} položiek → {dst}')
 
 
 if __name__ == '__main__':
