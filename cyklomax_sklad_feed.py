@@ -7,6 +7,7 @@ import sys, os, time, io
 from lxml import etree
 
 IN_TEXT = 'Skladom u dodávateľa'
+SUPPLIER = 'Cyklomax'   # doplní sa ku každému kódu; '' = nedopĺňať
 OUT_TEXT = 'Na otázku'
 
 UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
@@ -64,6 +65,8 @@ def main(src, dst):
     for code, qty in best.items():
         si = etree.SubElement(shop, 'SHOPITEM')
         etree.SubElement(si, 'CODE').text = code
+        if SUPPLIER:
+            etree.SubElement(si, 'SUPPLIER').text = SUPPLIER
         st = etree.SubElement(si, 'STOCK')
         etree.SubElement(st, 'AMOUNT').text = str(qty)
         etree.SubElement(si, 'AVAILABILITY_IN_STOCK').text = IN_TEXT
