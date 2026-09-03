@@ -15,6 +15,7 @@ import sys, os, time, io
 from lxml import etree
 
 IN_TEXT = 'Skladom u dodávateľa'
+SUPPLIER = 'Sloger'   # doplní sa ku každému kódu; '' = nedopĺňať
 OUT_TEXT = 'Na otázku'
 MISSING_TEXT = 'Momentálne nedostupné'
 
@@ -129,6 +130,8 @@ def main(dst):
     def polozka(code, qty, text_out):
         si = etree.SubElement(shop, 'SHOPITEM')
         etree.SubElement(si, 'CODE').text = code
+        if SUPPLIER:
+            etree.SubElement(si, 'SUPPLIER').text = SUPPLIER
         st = etree.SubElement(si, 'STOCK')
         etree.SubElement(st, 'AMOUNT').text = str(qty)
         etree.SubElement(si, 'AVAILABILITY_IN_STOCK').text = IN_TEXT
