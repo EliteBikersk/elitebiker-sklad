@@ -10,6 +10,7 @@ from lxml import etree
 
 NS = '{http://www.benefitcz.cz/ws/}'
 IN_TEXT = 'Skladom u dodávateľa'
+SUPPLIER = 'Aspire'   # doplní sa ku každému kódu; '' = nedopĺňať
 OUT_TEXT = 'Na otázku'
 WAREHOUSE = 'Sklad u dodávateľa'
 
@@ -33,6 +34,8 @@ def main(src, dst):
         qty = int(it.findtext(NS + 'Mnozstvi') or 0)
         si = etree.SubElement(shop, 'SHOPITEM')
         etree.SubElement(si, 'CODE').text = kar
+        if SUPPLIER:
+            etree.SubElement(si, 'SUPPLIER').text = SUPPLIER
         st = etree.SubElement(si, 'STOCK')
         etree.SubElement(st, 'AMOUNT').text = str(max(qty, 0))
         etree.SubElement(si, 'AVAILABILITY_IN_STOCK').text = IN_TEXT
