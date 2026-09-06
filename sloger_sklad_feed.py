@@ -16,6 +16,7 @@ from lxml import etree
 
 IN_TEXT = 'Skladom u dodávateľa'
 SUPPLIER = 'Sloger'   # doplní sa ku každému kódu; '' = nedopĺňať
+DOPRAVA = 5.0         # € pripočítané k nákupnej cene (0 = nepripočítavať)
 OUT_TEXT = 'Na otázku'
 MISSING_TEXT = 'Momentálne nedostupné'
 
@@ -50,13 +51,29 @@ def fetch(url):
 
 
 def kody_z_feedu(data):
-    """Všetky <code> kdekoľvek v dokumente – produkty aj varianty v <options>."""
-    k = set()
-    for el in etree.parse(io.BytesIO(data)).iter('code'):
-        c = (el.text or '').strip()
-        if c:
-            k.add(c)
-    return k
+    """Kódy + nákupné ceny (price_no_vat). Produkty aj varianty v <options>.
+    Ak variant vlastnú cenu nemá, zdedí ju od nadradeného produktu."""
+    k, ceny = set(), {}
+    t = etree.parse(io.BytesIO(data))
+    for el in t.iter():
+        ce = el.find('code')
+        if ce is None or not (ce.text or '').strip():
+            continue
+        c = ce.text.strip()
+        k.add(c)
+        p = el.findtext('price_no_vat')
+        if p is None:                       # skús nadradený produkt
+            par = el.getparent()
+            while par is not None and p is None:
+                p = par.findtext('price_no_vat')
+                par = par.getparent()
+        try:
+            v = float((p or '').replace(',', '.'))
+            if v > 0:
+                ceny[c] = v
+        except ValueError:
+            pass
+    return k, ceny
 
 
 def main(dst):
@@ -89,18 +106,21 @@ def main(dst):
         zdroje.append(cat)
 
     znama = set()
+    ceny = {}
     ok = chyb = 0
     for u in zdroje:
         nazov = u.rsplit('/', 1)[-1]
         try:
-            k = kody_z_feedu(fetch(u))
+            k, c = kody_z_feedu(fetch(u))
             znama |= k
+            ceny.update(c)
             ok += 1
-            print(f'  {nazov}: {len(k)} kódov')
+            print(f'  {nazov}: {len(k)} kódov, {len(c)} s cenou')
         except Exception as e:
             chyb += 1
             print(f'  {nazov}: CHYBA – preskakujem ({e})')
-    print(f'  spolu {len(znama)} kódov z {ok} feedov ({chyb} zlyhalo)')
+    print(f'  spolu {len(znama)} kódov z {ok} feedov ({chyb} zlyhalo), '
+          f'{len(ceny)} nákupných cien')
 
     chybajuce = znama - set(stock)
     print(f'  chýba v dostupnostiach: {len(chybajuce)}')
@@ -132,6 +152,8 @@ def main(dst):
         etree.SubElement(si, 'CODE').text = code
         if SUPPLIER:
             etree.SubElement(si, 'SUPPLIER').text = SUPPLIER
+        if code in ceny:
+            etree.SubElement(si, 'PURCHASE_PRICE').text = f'{ceny[code] + DOPRAVA:.4f}'
         st = etree.SubElement(si, 'STOCK')
         etree.SubElement(st, 'AMOUNT').text = str(qty)
         etree.SubElement(si, 'AVAILABILITY_IN_STOCK').text = IN_TEXT
