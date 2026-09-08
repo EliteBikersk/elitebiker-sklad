@@ -18,6 +18,22 @@ Env:
 import sys, os, time, io
 from lxml import etree
 
+
+def cudzie_kody(moj):
+    """Kódy, ktoré podľa vlastnik_kodov.txt patria INÉMU dodávateľovi – tie preskočíme."""
+    cesta = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vlastnik_kodov.txt')
+    s = set()
+    if not os.path.exists(cesta):
+        return s
+    for line in open(cesta, encoding='utf-8'):
+        line = line.split('#', 1)[0].strip()
+        if not line or ';' not in line:
+            continue
+        code, dod = [x.strip() for x in line.split(';', 1)]
+        if dod.lower() != moj.lower():
+            s.add(code)
+    return s
+
 IN_TEXT = 'Skladom u dodávateľa'
 OUT_TEXT = 'Na otázku'
 MISSING_TEXT = 'Momentálne nedostupné'
@@ -109,6 +125,9 @@ def precitaj(data):
 
 
 def main(dst):
+    cudzie = cudzie_kody(SUPPLIER)
+    if cudzie:
+        print(f'Preskakujem {len(cudzie)} kódov patriacich iným dodávateľom')
     print('Dostupnosti...')
     stock = {}
     for av in etree.parse(io.BytesIO(fetch(os.environ['SLOGER_XML_URL']))).iter('availability'):
@@ -182,6 +201,8 @@ def main(dst):
     shop = etree.Element('SHOP')
 
     def polozka(code, qty, text_out, vis=None):
+        if code in cudzie:
+            return
         si = etree.SubElement(shop, 'SHOPITEM')
         etree.SubElement(si, 'CODE').text = code
         etree.SubElement(si, 'SUPPLIER').text = SUPPLIER
