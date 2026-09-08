@@ -164,7 +164,16 @@ def main(dst):
 
     # čo máš v e-shope = značkové feedy
     vsetko, varianty = set(), set()
-    zdroje = [u.strip() for u in os.environ.get('SLOGER_BRAND_FEEDS', '').splitlines() if u.strip()]
+    # zoznam značkových feedov: zo secretu, alebo zo súboru sloger_znackove_feedy.txt v repe
+    raw = os.environ.get('SLOGER_BRAND_FEEDS', '')
+    if not raw.strip():
+        cesta = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sloger_znackove_feedy.txt')
+        if os.path.exists(cesta):
+            raw = open(cesta, encoding='utf-8').read()
+            print(f'  zoznam feedov zo súboru {os.path.basename(cesta)}')
+    zdroje = [u.strip() for u in raw.splitlines() if u.strip() and not u.strip().startswith('#')]
+    if not zdroje:
+        print('  VAROVANIE: žiadne značkové feedy – bez nich sa nedá zistiť, čo skryť!')
     print(f'Značkové feedy ({len(zdroje)})...')
     ok = chyb = 0
     for u in zdroje:
