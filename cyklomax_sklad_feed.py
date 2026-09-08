@@ -6,6 +6,22 @@ Aktualizuje: sklad (AMOUNT) + dostupnosti. Páruje podľa CODE (= <ID> z feedu).
 import sys, os, time, io
 from lxml import etree
 
+
+def cudzie_kody(moj):
+    """Kódy, ktoré podľa vlastnik_kodov.txt patria INÉMU dodávateľovi – tie preskočíme."""
+    cesta = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vlastnik_kodov.txt')
+    s = set()
+    if not os.path.exists(cesta):
+        return s
+    for line in open(cesta, encoding='utf-8'):
+        line = line.split('#', 1)[0].strip()
+        if not line or ';' not in line:
+            continue
+        code, dod = [x.strip() for x in line.split(';', 1)]
+        if dod.lower() != moj.lower():
+            s.add(code)
+    return s
+
 IN_TEXT = 'Skladom u dodávateľa'
 SUPPLIER = 'Cyklomax'   # doplní sa ku každému kódu; '' = nedopĺňať
 OUT_TEXT = 'Na otázku'
@@ -45,10 +61,13 @@ def load(src):
 
 def main(src, dst):
     t = load(src)
+    cudzie = cudzie_kody(SUPPLIER)
+    if cudzie:
+        print(f'  preskakujem {len(cudzie)} kódov patriacich iným dodávateľom')
     best = {}
     for p in t.iter('PRODUCT'):
         code = (p.findtext('ID') or '').strip()
-        if not code:
+        if not code or code in cudzie:
             continue
         try:
             qty = max(int(float(p.findtext('STOCK') or 0)), 0)
