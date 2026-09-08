@@ -1,38 +1,42 @@
 # -*- coding: utf-8 -*-
 """
-sloger_sklad_feed.py — Sloger → Shoptet aktualizačný feed
-v5: zdrojom zoznamu variantov sú ZNAČKOVÉ feedy, z ktorých boli produkty nahodené.
+sloger_sklad_feed.py — Sloger → Shoptet aktualizačný feed  (v6)
 
-Vstupy (env):
-  SLOGER_XML_URL      – dostupnostný feed (sklady)                [povinné]
-  SLOGER_BRAND_FEEDS  – URL značkových feedov, jedna na riadok    [odporúčané]
-  SLOGER_CATALOG_URL  – hlavný katalóg, doplnkový zdroj           [voliteľné]
+Logika:
+  ZNAČKOVÉ feedy  = všetko, čo si kedy importoval do e-shopu
+  KATALÓG + DOSTUPNOSTI = čo Sloger vedie DNES
 
-Kód, ktorý je v značkových feedoch / katalógu, ale NIE je v dostupnostiach,
-dostane 0 ks a dostupnosť MISSING_TEXT.
+  kód v dostupnostiach            → skutočný sklad + dostupnosť
+  variant, ktorý dnes chýba       → 0 ks + 'Momentálne nedostupné'
+  produkt (bez variantov), chýba  → 0 ks + skrytý (VISIBILITY)
+
+Env:
+  SLOGER_XML_URL       – dostupnostný feed        [povinné]
+  SLOGER_CATALOG_URL   – hlavný katalóg           [povinné pre skrývanie]
+  SLOGER_BRAND_FEEDS   – značkové feedy, 1/riadok [povinné pre skrývanie]
 """
 import sys, os, time, io
 from lxml import etree
 
 IN_TEXT = 'Skladom u dodávateľa'
-SUPPLIER = 'Sloger'   # doplní sa ku každému kódu; '' = nedopĺňať
-DOPRAVA = 5.0         # € pripočítané k nákupnej cene (0 = nepripočítavať)
 OUT_TEXT = 'Na otázku'
 MISSING_TEXT = 'Momentálne nedostupné'
+SUPPLIER = 'Sloger'
+DOPRAVA = 0.0          # € k nákupnej cene (0 = nepripočítavať)
+
+SKRYVAT = True         # skrývať produkty, ktoré Sloger už nevedie
+VIS_ON = 'visible'
+VIS_OFF = 'hidden'     # ak validátor odmietne, skús 'detailOnly'
 
 DAYS_TEXT = {0: OUT_TEXT, 2: 'Do 2 dní', 3: 'Do 3 dní', 5: 'Do 5 dní',
              31: 'Do mesiaca', 999: OUT_TEXT}
 
+KOD_TAGY = {'code', 'kod', 'sku', 'product_code', 'item_code', 'productno'}
+CENA_TAGY = {'price_no_vat', 'price_novat', 'voc', 'purchase_price'}
+
 UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/126.0 Safari/537.36')
-ATTEMPTS, WAIT, TIMEOUT, MIN_ITEMS = 3, 30, 180, 100
-
-# Dopĺňanie chýbajúcich veľkostí podľa kódu:
-#   kód varianty = kód modelu + jedna číslica (napr. 73243000|1, 102510512|0)
-# Pre každý model doplníme číslice, ktoré Sloger nikde nehlási → 0 ks + nedostupné.
-# Kód, ktorý v e-shope neexistuje, Shoptet pri "iba existujúce" ignoruje.
-DOPLNIT_VARIANTY = True
-MIN_DLZKA_KODU = 9        # len dlhé číselné kódy (krátke patria iným dodávateľom)
+ATTEMPTS, WAIT, TIMEOUT, MIN_ITEMS = 3, 30, 240, 100
 
 
 def fetch(url):
@@ -47,41 +51,67 @@ def fetch(url):
             last = e
             if n < ATTEMPTS:
                 time.sleep(WAIT)
-    raise RuntimeError(f'{last}')
+    raise RuntimeError(str(last))
 
 
-def kody_z_feedu(data):
-    """Kódy + nákupné ceny (price_no_vat). Produkty aj varianty v <options>.
-    Ak variant vlastnú cenu nemá, zdedí ju od nadradeného produktu."""
-    k, ceny = set(), {}
+def _text(el, tagy):
+    for ch in el:
+        if isinstance(ch.tag, str) and ch.tag.lower() in tagy:
+            t = (ch.text or '').strip()
+            if t:
+                return t
+    return None
+
+
+def precitaj(data):
+    """→ (kody, varianty, ceny, rodic). Variant = kód vnútri <options>.
+    rodic = {kód produktu: {kódy jeho variantov}}"""
+    kody, varianty, ceny, rodic = set(), set(), {}, {}
     t = etree.parse(io.BytesIO(data))
     for el in t.iter():
-        ce = el.find('code')
-        if ce is None or not (ce.text or '').strip():
+        if not isinstance(el.tag, str):
             continue
-        c = ce.text.strip()
-        k.add(c)
-        p = el.findtext('price_no_vat')
-        if p is None:                       # skús nadradený produkt
-            par = el.getparent()
-            while par is not None and p is None:
-                p = par.findtext('price_no_vat')
-                par = par.getparent()
+        code = _text(el, KOD_TAGY)
+        if not code:
+            continue
+        kody.add(code)
+        # je to variant? (niektorý predok je <options>/<variants>)
+        p, je_variant = el.getparent(), False
+        while p is not None:
+            if isinstance(p.tag, str) and p.tag.lower() in ('options', 'variants'):
+                varianty.add(code)
+                je_variant = True
+                break
+            p = p.getparent()
+        # priradenie variantu k nadradenému produktu
+        if je_variant:
+            q = el.getparent()
+            while q is not None:
+                rc = _text(q, KOD_TAGY)
+                if rc and rc != code:
+                    rodic.setdefault(rc, set()).add(code)
+                    break
+                q = q.getparent()
+        # cena – vlastná alebo zdedená
+        cena = _text(el, CENA_TAGY)
+        if cena is None:
+            p = el.getparent()
+            while p is not None and cena is None:
+                cena = _text(p, CENA_TAGY)
+                p = p.getparent()
         try:
-            v = float((p or '').replace(',', '.'))
+            v = float((cena or '').replace(',', '.'))
             if v > 0:
-                ceny[c] = v
+                ceny[code] = v
         except ValueError:
             pass
-    return k, ceny
+    return kody, varianty, ceny, rodic
 
 
 def main(dst):
-    # 1) dostupnosti
-    print('Sťahujem dostupnostný feed...')
-    t = etree.parse(io.BytesIO(fetch(os.environ['SLOGER_XML_URL'])))
+    print('Dostupnosti...')
     stock = {}
-    for av in t.iter('availability'):
+    for av in etree.parse(io.BytesIO(fetch(os.environ['SLOGER_XML_URL']))).iter('availability'):
         code = (av.findtext('code') or '').strip()
         if not code:
             continue
@@ -95,81 +125,84 @@ def main(dst):
             days = 999
         if code not in stock or qty > stock[code][0]:
             stock[code] = (qty, days)
-    print(f'  dostupnosti: {len(stock)} kódov')
+    print(f'  {len(stock)} kódov')
     if len(stock) < MIN_ITEMS:
-        raise SystemExit(f'CHYBA: dostupnosti maju len {len(stock)} poloziek, nezapisujem')
+        raise SystemExit('CHYBA: dostupnosti su prazdne, nezapisujem')
 
-    # 2) zoznam všetkých variantov zo značkových feedov (+ katalóg)
-    zdroje = [u.strip() for u in os.environ.get('SLOGER_BRAND_FEEDS', '').splitlines() if u.strip()]
+    # čo Sloger vedie DNES = katalóg + dostupnosti
+    dnes = set(stock)
+    rodic = {}
     cat = os.environ.get('SLOGER_CATALOG_URL', '').strip()
-    if cat:
-        zdroje.append(cat)
-
-    znama = set()
     ceny = {}
+    if cat:
+        print('Katalóg...')
+        k, _v, c, r = precitaj(fetch(cat))
+        for a, b in r.items():
+            rodic.setdefault(a, set()).update(b)
+        dnes |= k
+        ceny.update(c)
+        print(f'  {len(k)} kódov, {len(c)} cien')
+
+    # čo máš v e-shope = značkové feedy
+    vsetko, varianty = set(), set()
+    zdroje = [u.strip() for u in os.environ.get('SLOGER_BRAND_FEEDS', '').splitlines() if u.strip()]
+    print(f'Značkové feedy ({len(zdroje)})...')
     ok = chyb = 0
     for u in zdroje:
         nazov = u.rsplit('/', 1)[-1]
         try:
-            k, c = kody_z_feedu(fetch(u))
-            znama |= k
+            k, var, c, r = precitaj(fetch(u))
+            for a, b in r.items():
+                rodic.setdefault(a, set()).update(b)
+            vsetko |= k
+            varianty |= var
             ceny.update(c)
             ok += 1
-            print(f'  {nazov}: {len(k)} kódov, {len(c)} s cenou')
+            print(f'  {nazov}: {len(k)} kódov ({len(var)} variantov)')
         except Exception as e:
             chyb += 1
-            print(f'  {nazov}: CHYBA – preskakujem ({e})')
-    print(f'  spolu {len(znama)} kódov z {ok} feedov ({chyb} zlyhalo), '
-          f'{len(ceny)} nákupných cien')
+            print(f'  {nazov}: CHYBA – {e}')
+    print(f'  spolu {len(vsetko)} kódov, {ok} ok / {chyb} chyba')
 
-    chybajuce = znama - set(stock)
-    print(f'  chýba v dostupnostiach: {len(chybajuce)}')
+    chybajuce = (vsetko | dnes) - set(stock)
+    # produkt sa NESKRÝVA, ak má aspoň jeden variant skladom
+    na_skrytie = set()
+    if SKRYVAT:
+        for c in chybajuce:
+            if c in varianty:
+                continue
+            if rodic.get(c, set()) & set(stock):
+                continue
+            na_skrytie.add(c)
+    print(f'Chýba dnes: {len(chybajuce)}  (z toho na skrytie {len(na_skrytie)})')
 
-    doplnene = set()
-    if DOPLNIT_VARIANTY:
-        from collections import defaultdict
-        vsetky = set(stock) | znama
-        pref = defaultdict(set)
-        for c in vsetky:
-            if c.isdigit() and len(c) >= MIN_DLZKA_KODU:
-                pref[c[:-1]].add(c[-1])
-        for p, cislice in pref.items():
-            for x in '0123456789':
-                if x not in cislice:
-                    doplnene.add(p + x)
-        doplnene -= vsetky
-        print(f'  doplnené chýbajúce veľkosti: {len(doplnene)}')
+    if vsetko and len(chybajuce) > 3 * len(stock):
+        raise SystemExit('CHYBA: podozrivo vela na vynulovanie, nezapisujem')
 
-    # poistka: keby sa zdroje nepodarilo stiahnuť, radšej nenuluj nič
-    if znama and len(chybajuce) > 3 * len(stock):
-        raise SystemExit('CHYBA: podozrivo vela kodov na vynulovanie, nezapisujem')
-
-    # 3) výstup
     shop = etree.Element('SHOP')
 
-    def polozka(code, qty, text_out):
+    def polozka(code, qty, text_out, vis=None):
         si = etree.SubElement(shop, 'SHOPITEM')
         etree.SubElement(si, 'CODE').text = code
-        if SUPPLIER:
-            etree.SubElement(si, 'SUPPLIER').text = SUPPLIER
+        etree.SubElement(si, 'SUPPLIER').text = SUPPLIER
         if code in ceny:
-            etree.SubElement(si, 'PURCHASE_PRICE').text = f'{ceny[code] + DOPRAVA:.4f}'
+            etree.SubElement(si, 'PURCHASE_PRICE').text = f'{ceny[code] + DOPRAVA:.2f}'
+        if vis:
+            etree.SubElement(si, 'VISIBILITY').text = vis
         st = etree.SubElement(si, 'STOCK')
         etree.SubElement(st, 'AMOUNT').text = str(qty)
         etree.SubElement(si, 'AVAILABILITY_IN_STOCK').text = IN_TEXT
         etree.SubElement(si, 'AVAILABILITY_OUT_OF_STOCK').text = text_out
 
     for code, (qty, days) in stock.items():
-        polozka(code, qty, DAYS_TEXT.get(days, OUT_TEXT))
+        polozka(code, qty, DAYS_TEXT.get(days, OUT_TEXT),
+                VIS_ON if (SKRYVAT and code not in varianty) else None)
     for code in sorted(chybajuce):
-        polozka(code, 0, MISSING_TEXT)
-    for code in sorted(doplnene):
-        polozka(code, 0, MISSING_TEXT)
+        polozka(code, 0, MISSING_TEXT, VIS_OFF if code in na_skrytie else None)
 
     etree.ElementTree(shop).write(dst, encoding='UTF-8', xml_declaration=True, pretty_print=True)
-    print(f'OK: {len(stock)} zo skladov + {len(chybajuce)} chýbajúcich '
-          f'+ {len(doplnene)} doplnených veľkostí '
-          f'= {len(stock) + len(chybajuce) + len(doplnene)} položiek → {dst}')
+    print(f'OK: {len(stock)} dostupných + {len(chybajuce)} nedostupných '
+          f'= {len(shop)} položiek → {dst}')
 
 
 if __name__ == '__main__':
