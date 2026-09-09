@@ -40,7 +40,7 @@ MISSING_TEXT = 'Momentálne nedostupné'
 SUPPLIER = 'Sloger'
 DOPRAVA = 0.0          # € k nákupnej cene (0 = nepripočítavať)
 
-SKRYVAT = True         # skrývať produkty, ktoré Sloger už nevedie
+SKRYVAT = False        # False = nič neskrývať, len 0 ks + 'Momentálne nedostupné'
 VIS_ON = 'visible'
 VIS_OFF = 'hidden'     # ak validátor odmietne, skús 'detailOnly'
 
@@ -191,6 +191,31 @@ def main(dst):
             chyb += 1
             print(f'  {nazov}: CHYBA – {e}')
     print(f'  spolu {len(vsetko)} kódov, {ok} ok / {chyb} chyba')
+
+    # PAMÄŤ: každý kód, ktorý kedy bol v značkových feedoch, si pamätáme v docs/.
+    # Keď ho Sloger neskôr zmaže aj zo značkového feedu, stále vieme, že ho máš v e-shope.
+    pamat_cesta = os.path.join(os.path.dirname(os.path.abspath(dst)), 'sloger_pamat_kodov.txt')
+    pamat, pamat_var = set(), set()
+    if os.path.exists(pamat_cesta):
+        for line in open(pamat_cesta, encoding='utf-8'):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            c, _, typ = line.partition('\t')
+            pamat.add(c)
+            if typ == 'v':
+                pamat_var.add(c)
+    nove = vsetko - pamat
+    if ok:                                  # zapisuj len ak sa feedy naozaj načítali
+        pamat |= vsetko
+        pamat_var |= varianty
+        with open(pamat_cesta, 'w', encoding='utf-8') as fh:
+            fh.write('# kódy, ktoré boli niekedy v značkových feedoch Slogera (v = variant)\n')
+            for c in sorted(pamat):
+                fh.write(f'{c}\t{"v" if c in pamat_var else "p"}\n')
+    print(f'  pamäť: {len(pamat)} kódov (+{len(nove)} nových)')
+    vsetko |= pamat
+    varianty |= pamat_var
 
     chybajuce = (vsetko | dnes) - set(stock)
     # produkt sa NESKRÝVA, ak má aspoň jeden variant skladom
