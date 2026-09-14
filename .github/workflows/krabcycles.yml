@@ -1,0 +1,37 @@
+name: KrabCycles sklad feed
+
+on:
+  schedule:
+    - cron: '35 */4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install lxml
+
+      - name: Generate feed
+        env:
+          KRABCYCLES_XML_URL: ${{ secrets.KRABCYCLES_XML_URL }}
+        run: |
+          mkdir -p docs
+          python3 krabcycles_sklad_feed.py - docs/krabcycles_sklad_shoptet.xml
+
+      - name: Commit
+        run: |
+          git config user.name "bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add docs/krabcycles_sklad_shoptet.xml
+          git diff --staged --quiet || git commit -m "krabcycles sklad update"
+          git push
