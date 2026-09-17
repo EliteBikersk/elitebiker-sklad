@@ -32,6 +32,6 @@ jobs:
         run: |
           git config user.name "bot"
           git config user.email "bot@users.noreply.github.com"
-          git add docs/krabcycles_sklad_shoptet.xml
+          git add docs/krabcycles_sklad_shoptet.xml docs/krabcycles_pamat_kodov.txt
           git diff --staged --quiet || git commit -m "krabcycles sklad update"
           git push
