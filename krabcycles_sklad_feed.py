@@ -9,6 +9,31 @@ Env:
 import sys, os, time, io
 from lxml import etree
 
+PAMAT_SUBOR = 'krabcycles_pamat_kodov.txt'
+
+MISSING_TEXT = 'Momentálne nedostupné'   # pre kódy, ktoré dodávateľ vyradil z feedu
+
+
+def s_pamatou(best, dst, cudzie=frozenset()):
+    """Pamätá si všetky kódy, ktoré kedy boli vo feede (docs/<dod>_pamat_kodov.txt).
+    Kód, ktorý dnes vo feede nie je, dostane 0 ks + MISSING_TEXT. Nič sa neskrýva."""
+    cesta = os.path.join(os.path.dirname(os.path.abspath(dst)), PAMAT_SUBOR)
+    pamat = set()
+    if os.path.exists(cesta):
+        for line in open(cesta, encoding='utf-8'):
+            line = line.strip()
+            if line and not line.startswith('#'):
+                pamat.add(line)
+    vyradene = (pamat - set(best)) - set(cudzie)
+    nove = set(best) - pamat
+    pamat |= set(best)
+    with open(cesta, 'w', encoding='utf-8') as fh:
+        fh.write('# kódy, ktoré boli niekedy vo feede dodávateľa\n')
+        for c in sorted(pamat):
+            fh.write(c + '\n')
+    print(f'pamäť: {len(pamat)} kódov (+{len(nove)} nových) | vyradených dodávateľom: {len(vyradene)} → {MISSING_TEXT}')
+    return vyradene
+
 IN_TEXT = 'Skladom u dodávateľa'
 OUT_TEXT = 'Na otázku'
 SUPPLIER = 'KrabCycles'
@@ -97,6 +122,10 @@ def main(src, dst):
     if len(best) < MIN_ITEMS:
         raise SystemExit(f'CHYBA: feed ma len {len(best)} poloziek, nezapisujem')
 
+    vyradene = s_pamatou(best, dst, cudzie)
+    for code in vyradene:
+        best[code] = (0, 99999, 0)
+
     shop = etree.Element('SHOP')
     for code, (qty, days, vo) in best.items():
         si = etree.SubElement(shop, 'SHOPITEM')
@@ -108,7 +137,7 @@ def main(src, dst):
         st = etree.SubElement(si, 'STOCK')
         etree.SubElement(st, 'AMOUNT').text = str(qty)
         etree.SubElement(si, 'AVAILABILITY_IN_STOCK').text = IN_TEXT
-        etree.SubElement(si, 'AVAILABILITY_OUT_OF_STOCK').text = text_pre(days)
+        etree.SubElement(si, 'AVAILABILITY_OUT_OF_STOCK').text = MISSING_TEXT if code in vyradene else text_pre(days)
 
     etree.ElementTree(shop).write(dst, encoding='UTF-8', xml_declaration=True, pretty_print=True)
     skladom = sum(1 for q, _, _ in best.values() if q > 0)
