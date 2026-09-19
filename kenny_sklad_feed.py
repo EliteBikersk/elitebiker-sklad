@@ -124,7 +124,7 @@ def main(src, dst):
         if SUPPLIER:
             etree.SubElement(si, 'SUPPLIER').text = SUPPLIER
         if voc:
-            etree.SubElement(si, 'PURCHASE_PRICE').text = f'{voc + DOPRAVA:.4f}'
+            etree.SubElement(si, 'PURCHASE_PRICE').text = f'{voc + DOPRAVA:.2f}'
         st = etree.SubElement(si, 'STOCK')
         etree.SubElement(st, 'AMOUNT').text = str(qty)
         etree.SubElement(si, 'AVAILABILITY_IN_STOCK').text = IN_TEXT
